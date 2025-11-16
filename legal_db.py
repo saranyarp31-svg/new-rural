@@ -31,3 +31,4 @@ LEGAL_DB = {
         "example": "Fake loan apps threatening users."
     }
 }
+
