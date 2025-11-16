@@ -1,7 +1,4 @@
 streamlit
 deep-translator
 pandas
-TTS==0.22.0
-torch
-numpy
-scipy
+requests
