@@ -4,22 +4,39 @@ import pandas as pd
 import requests
 import os
 from datetime import datetime
+import asyncio
+import edge_tts
 from legal_db import LEGAL_DB
 
 # ---------------------------------------------------
-# Streamlit App Settings
+# Streamlit Page Setup
 # ---------------------------------------------------
-st.set_page_config(
-    page_title="Rural ACT - Tamil Legal Awareness Translator",
-    layout="wide"
-)
+st.set_page_config(page_title="Rural ACT - Tamil Legal Translator", layout="wide")
 
 st.title("🌾 Rural ACT – Tamil Legal Awareness Translator")
-st.write("Translate English → Tamil + Legal Detection + Tamil Voice Output (via HuggingFace TTS)")
+st.write("Translate English → Tamil + Legal Detection + Tamil Voice Output (Edge-TTS)")
 
 
 # ---------------------------------------------------
-# Feedback Save Function
+# Tamil TTS using Edge-TTS (Works on Streamlit Cloud)
+# ---------------------------------------------------
+async def create_tts(text):
+    try:
+        communicate = edge_tts.Communicate(text, "ta-IN-ValluvarNeural")  # Tamil Male voice
+        await communicate.save("tamil_voice.mp3")
+        return "tamil_voice.mp3"
+    except:
+        return None
+
+def generate_audio(text):
+    try:
+        return asyncio.run(create_tts(text))
+    except:
+        return None
+
+
+# ---------------------------------------------------
+# Save Feedback
 # ---------------------------------------------------
 def save_feedback(original, tamil, section, fb_type, fb_detail=""):
     data = {
@@ -41,7 +58,7 @@ def save_feedback(original, tamil, section, fb_type, fb_detail=""):
 
 
 # ---------------------------------------------------
-# Legal Detection Function
+# Legal Keyword Detection
 # ---------------------------------------------------
 def detect_legal_section(text):
     text_low = text.lower()
@@ -52,50 +69,20 @@ def detect_legal_section(text):
 
 
 # ---------------------------------------------------
-# HuggingFace Tamil TTS Function (Works on Streamlit Cloud)
+# UI Input Box
 # ---------------------------------------------------
-def generate_audio(text):
-    api_url = "https://api-inference.huggingface.co/models/facebook/mms-tts-tam"
-
-    if "HF_TOKEN" not in st.secrets:
-        st.error("HuggingFace token missing! Add HF_TOKEN in Streamlit Secrets.")
-        return None
-
-    headers = {"Authorization": f"Bearer {st.secrets['HF_TOKEN']}"}
-    payload = {"inputs": text}
-
-    try:
-        response = requests.post(api_url, headers=headers, json=payload)
-
-        if response.status_code == 200:
-            audio_path = "tamil_audio.mp3"
-            with open(audio_path, "wb") as f:
-                f.write(response.content)
-            return audio_path
-        else:
-            st.warning("TTS request failed. Status code: " + str(response.status_code))
-            return None
-
-    except Exception as e:
-        st.warning("Audio generation error: " + str(e))
-        return None
+user_input = st.text_area("Enter English text:", height=160)
 
 
 # ---------------------------------------------------
-# UI – Input Box
-# ---------------------------------------------------
-user_input = st.text_area("Enter English text to translate:", height=160)
-
-
-# ---------------------------------------------------
-# Button Click
+# Main Logic
 # ---------------------------------------------------
 if st.button("Translate & Analyze"):
     if not user_input.strip():
-        st.warning("Please type some English text.")
+        st.warning("Please enter some text.")
         st.stop()
 
-    # Translation
+    # Translate to Tamil
     try:
         tamil_text = GoogleTranslator(source="auto", target="ta").translate(user_input)
         st.subheader("📌 Tamil Translation")
@@ -104,17 +91,18 @@ if st.button("Translate & Analyze"):
         st.error("Translation failed: " + str(e))
         tamil_text = ""
 
-    # Audio (Tamil Voice)
+    # Tamil Voice Output
     st.subheader("🔊 Tamil Voice Output")
     audio_file = generate_audio(tamil_text)
 
     if audio_file:
         st.audio(audio_file)
     else:
-        st.warning("Voice output unavailable right now.")
+        st.warning("Voice not available right now.")
 
-    # Legal Section Detection
+    # Legal Detection
     st.subheader("⚖️ Legal Awareness")
+
     legal = detect_legal_section(user_input)
 
     if legal:
@@ -128,24 +116,26 @@ if st.button("Translate & Analyze"):
         st.info("No legal issues detected.")
         section_name = "None"
 
-    # Feedback Section
-    st.subheader("📝 User Feedback")
+    # Feedback System
+    st.subheader("📝 Feedback")
+
     col1, col2 = st.columns(2)
 
-    if col1.button("✅ I Understood"):
+    if col1.button("✅ Understand"):
         save_feedback(user_input, tamil_text, section_name, "Understand")
-        st.success("Thank you! Feedback saved.")
+        st.success("Feedback saved!")
 
-    if col2.button("❌ I Did Not Understand"):
-        need = st.radio("What help do you need?", ["Text", "Voice", "Both"])
+    if col2.button("❌ Not Understand"):
+        need = st.radio("What do you need help with?", ["Text", "Voice", "Both"])
         save_feedback(user_input, tamil_text, section_name, "Not Understand", need)
-        st.error("Feedback saved. We will improve the explanation.")
+        st.error("Feedback saved. We will improve!")
 
-# Developer Option to View Feedback
+
+# Developer Option
 if st.checkbox("Show Feedback Log (Developer Only)"):
     if os.path.exists("user_feedback.csv"):
         df = pd.read_csv("user_feedback.csv")
-        st.dataframe(df.tail(30))
+        st.dataframe(df.tail(20))
     else:
         st.info("No feedback available yet.")
 
