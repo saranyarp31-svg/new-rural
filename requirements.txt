@@ -1,5 +1,7 @@
 streamlit
 deep-translator
-gTTS
 pandas
-python-dotenv
+TTS==0.22.0
+torch
+numpy
+scipy
