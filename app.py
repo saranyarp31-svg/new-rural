@@ -1,16 +1,26 @@
 import streamlit as st
 from deep_translator import GoogleTranslator
 import pandas as pd
-import os
 import requests
+import os
 from datetime import datetime
 from legal_db import LEGAL_DB
 
-st.set_page_config(page_title="Rural ACT - Tamil Legal Translator", layout="wide")
+# ---------------------------------------------------
+# Streamlit App Settings
+# ---------------------------------------------------
+st.set_page_config(
+    page_title="Rural ACT - Tamil Legal Awareness Translator",
+    layout="wide"
+)
 
-# -------------------------
-# Helper: Save feedback CSV
-# -------------------------
+st.title("🌾 Rural ACT – Tamil Legal Awareness Translator")
+st.write("Translate English → Tamil + Legal Detection + Tamil Voice Output (via HuggingFace TTS)")
+
+
+# ---------------------------------------------------
+# Feedback Save Function
+# ---------------------------------------------------
 def save_feedback(original, tamil, section, fb_type, fb_detail=""):
     data = {
         "timestamp": [datetime.now().isoformat()],
@@ -20,121 +30,124 @@ def save_feedback(original, tamil, section, fb_type, fb_detail=""):
         "feedback_type": [fb_type],
         "feedback_detail": [fb_detail]
     }
+
     df = pd.DataFrame(data)
+
     fname = "user_feedback.csv"
     if os.path.exists(fname):
         df.to_csv(fname, mode="a", header=False, index=False)
     else:
         df.to_csv(fname, index=False)
 
-# -------------------------
-# Keyword-based legal detect
-# -------------------------
+
+# ---------------------------------------------------
+# Legal Detection Function
+# ---------------------------------------------------
 def detect_legal_section(text):
-    text_lower = text.lower()
-    for k, info in LEGAL_DB.items():
-        if k in text_lower:
+    text_low = text.lower()
+    for keyword, info in LEGAL_DB.items():
+        if keyword in text_low:
             return info
     return None
 
-# -------------------------
-# Hugging Face TTS via inference API
-# -------------------------
-def generate_tts_hf(text, model="google/mattts-tts-tamil", out_path="tamil_audio.wav"):
-    """
-    Generates audio using HuggingFace Inference API.
-    Requires HF token stored in Streamlit secrets as HF_TOKEN.
-    Returns path to saved audio or None on error.
-    """
+
+# ---------------------------------------------------
+# HuggingFace Tamil TTS Function (Works on Streamlit Cloud)
+# ---------------------------------------------------
+def generate_audio(text):
+    api_url = "https://api-inference.huggingface.co/models/facebook/mms-tts-tam"
+
     if "HF_TOKEN" not in st.secrets:
-        st.error("HuggingFace token not found in Streamlit secrets. Add HF_TOKEN first.")
+        st.error("HuggingFace token missing! Add HF_TOKEN in Streamlit Secrets.")
         return None
 
-    api_url = f"https://api-inference.huggingface.co/models/{model}"
     headers = {"Authorization": f"Bearer {st.secrets['HF_TOKEN']}"}
     payload = {"inputs": text}
 
     try:
-        # POST request (binary audio returned)
-        resp = requests.post(api_url, headers=headers, json=payload, timeout=30)
-        if resp.status_code == 200 and resp.content:
-            with open(out_path, "wb") as f:
-                f.write(resp.content)
-            return out_path
+        response = requests.post(api_url, headers=headers, json=payload)
+
+        if response.status_code == 200:
+            audio_path = "tamil_audio.mp3"
+            with open(audio_path, "wb") as f:
+                f.write(response.content)
+            return audio_path
         else:
-            # Helpful debug info in app logs for developer
-            st.warning(f"TTS request failed (status {resp.status_code}).")
+            st.warning("TTS request failed. Status code: " + str(response.status_code))
             return None
+
     except Exception as e:
-        st.warning("TTS request error: " + str(e))
+        st.warning("Audio generation error: " + str(e))
         return None
 
-# -------------------------
-# Streamlit UI
-# -------------------------
-st.title("🌾 Rural ACT – Tamil Legal Awareness Translator")
-st.write("Enter an English message, get Tamil translation + legal awareness + Tamil audio (via HuggingFace).")
 
-input_text = st.text_area("Enter English message:", height=160)
+# ---------------------------------------------------
+# UI – Input Box
+# ---------------------------------------------------
+user_input = st.text_area("Enter English text to translate:", height=160)
 
+
+# ---------------------------------------------------
+# Button Click
+# ---------------------------------------------------
 if st.button("Translate & Analyze"):
-    if not input_text.strip():
-        st.warning("Please write or paste the English message.")
+    if not user_input.strip():
+        st.warning("Please type some English text.")
         st.stop()
 
-    # Translate English -> Tamil
+    # Translation
     try:
-        tamil_text = GoogleTranslator(source="auto", target="ta").translate(input_text)
+        tamil_text = GoogleTranslator(source="auto", target="ta").translate(user_input)
+        st.subheader("📌 Tamil Translation")
+        st.success(tamil_text)
     except Exception as e:
         st.error("Translation failed: " + str(e))
         tamil_text = ""
 
-    st.subheader("📌 Tamil Translation")
-    if tamil_text:
-        st.success(tamil_text)
+    # Audio (Tamil Voice)
+    st.subheader("🔊 Tamil Voice Output")
+    audio_file = generate_audio(tamil_text)
+
+    if audio_file:
+        st.audio(audio_file)
     else:
-        st.info("Translation returned empty.")
+        st.warning("Voice output unavailable right now.")
 
-    # Try generate TTS using HuggingFace
-    tts_path = generate_tts_hf(tamil_text)
-
-    if tts_path:
-        st.audio(tts_path)
-    else:
-        st.info("Voice output not available. You can still read the Tamil text.")
-
-    # Legal detection
-    legal = detect_legal_section(input_text)
+    # Legal Section Detection
     st.subheader("⚖️ Legal Awareness")
+    legal = detect_legal_section(user_input)
+
     if legal:
         st.write(f"**Section:** {legal['section']}")
-        st.write(f"**Explanation (Tamil):** {legal['tamil']}")
+        st.write(f"**Explanation:** {legal['tamil']}")
         st.write(f"**Punishment:** {legal['punishment']}")
         st.write(f"**Helpline:** {legal['helpline']}")
         st.info(f"Example: {legal['example']}")
         section_name = legal["section"]
     else:
-        st.info("No legal keywords detected.")
+        st.info("No legal issues detected.")
         section_name = "None"
 
-    # Feedback UI
-    st.subheader("📝 Feedback")
+    # Feedback Section
+    st.subheader("📝 User Feedback")
     col1, col2 = st.columns(2)
-    if col1.button("✅ Understand"):
-        save_feedback(input_text, tamil_text, section_name, "Understand")
-        st.success("Thanks — feedback saved.")
-    if col2.button("❌ Not Understand"):
-        fb_choice = st.radio("Would you like clarification via:", ["Text", "Voice", "Both"])
-        save_feedback(input_text, tamil_text, section_name, "Not Understand", fb_choice)
-        st.error("Feedback saved. We'll improve the explanation.")
 
-# Show stored feedback (developer convenience)
-if st.checkbox("Show feedback CSV (developer)"):
+    if col1.button("✅ I Understood"):
+        save_feedback(user_input, tamil_text, section_name, "Understand")
+        st.success("Thank you! Feedback saved.")
+
+    if col2.button("❌ I Did Not Understand"):
+        need = st.radio("What help do you need?", ["Text", "Voice", "Both"])
+        save_feedback(user_input, tamil_text, section_name, "Not Understand", need)
+        st.error("Feedback saved. We will improve the explanation.")
+
+# Developer Option to View Feedback
+if st.checkbox("Show Feedback Log (Developer Only)"):
     if os.path.exists("user_feedback.csv"):
         df = pd.read_csv("user_feedback.csv")
-        st.dataframe(df.tail(50))
+        st.dataframe(df.tail(30))
     else:
-        st.info("No feedback yet.")
+        st.info("No feedback available yet.")
 
 
 
